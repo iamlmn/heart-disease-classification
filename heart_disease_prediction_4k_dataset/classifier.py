@@ -25,6 +25,7 @@ print(df.count())
 df.printSchema()
 
 # TODO : Add P-value finding signficant columns
+# https://www.kaggle.com/code/besenturk/logistic-regression-to-predict-heart-disease
 def getSignificantColumns(df):
     ignore_cols = ['currentSmoker',  'BPMeds', 'prevalentStroke', 'prevalentHyp', 'diabetes', 'diaBP', 'BMI', 'heartRate']
     df = df.drop("education")
