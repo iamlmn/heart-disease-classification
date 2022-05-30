@@ -1,0 +1,305 @@
+[lvaigaishrinivasan@linux10605 ~]$ 
+[lvaigaishrinivasan@linux10605 ~]$ 
+[lvaigaishrinivasan@linux10605 ~]$ pyspark
+Python 2.7.5 (default, Nov 16 2020, 22:23:17) 
+[GCC 4.8.5 20150623 (Red Hat 4.8.5-44)] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+22/05/30 01:14:16 WARN lineage.LineageWriter: Lineage directory /var/log/spark2/lineage doesn't exist or is not writable. Lineage for this application will be disabled.
+22/05/30 01:14:16 WARN lineage.LineageWriter: Lineage directory /var/log/spark2/lineage doesn't exist or is not writable. Lineage for this application will be disabled.
+Welcome to
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /__ / .__/\_,_/_/ /_/\_\   version 2.4.0.cloudera2
+      /_/
+
+Using Python version 2.7.5 (default, Nov 16 2020 22:23:17)
+SparkSession available as 'spark'.
+>>> from pyspark.sql import SparkSession
+>>> from pyspark.sql.functions import isnan, when, count, col
+>>> from pyspark.sql.types import IntegerType,BooleanType,DateType
+>>> from pyspark.ml.feature import StringIndexer, OneHotEncoder
+>>> from pyspark.ml.feature import VectorAssembler
+>>> from pyspark.ml.feature import MinMaxScaler
+>>> from pyspark.ml.classification import (LogisticRegression, RandomForestClassifier, NaiveBayes)
+>>> # from pyspark.ml.evaluation import BinaryClassificationEvaluator
+... from pyspark.ml import Pipeline
+>>> 
+>>> # If SparkSession already exists it returns otherwise create a new SparkSession.
+... spark = SparkSession.builder.appName('heart-disease-prediction').getOrCreate()
+>>> 
+>>> # load dataset
+... df = spark.read.csv('framingham.csv', inferSchema=True, header=True) 
+
+
+
+
+>>>                                                                             
+>>> #view five records
+... df.show(5)   
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+-----+---------+-------+----------+
+|male|age|education|currentSmoker|cigsPerDay|BPMeds|prevalentStroke|prevalentHyp|diabetes|totChol|sysBP|diaBP|  BMI|heartRate|glucose|TenYearCHD|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+-----+---------+-------+----------+
+|   1| 39|        4|            0|         0|     0|              0|           0|       0|    195|106.0| 70.0|26.97|       80|     77|         0|
+|   0| 46|        2|            0|         0|     0|              0|           0|       0|    250|121.0| 81.0|28.73|       95|     76|         0|
+|   1| 48|        1|            1|        20|     0|              0|           0|       0|    245|127.5| 80.0|25.34|       75|     70|         0|
+|   0| 61|        3|            1|        30|     0|              0|           1|       0|    225|150.0| 95.0|28.58|       65|    103|         1|
+|   0| 46|        3|            1|        23|     0|              0|           0|       0|    285|130.0| 84.0| 23.1|       85|     85|         0|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+-----+---------+-------+----------+
+only showing top 5 rows
+
+>>> 
+>>> # print dataframe columns and count
+... print(df.columns)
+['male', 'age', 'education', 'currentSmoker', 'cigsPerDay', 'BPMeds', 'prevalentStroke', 'prevalentHyp', 'diabetes', 'totChol', 'sysBP', 'diaBP', 'BMI', 'heartRate', 'glucose', 'TenYearCHD']
+>>> print(df.count())
+4238
+>>> 
+>>> # print schema
+... df.printSchema()
+root
+ |-- male: integer (nullable = true)
+ |-- age: integer (nullable = true)
+ |-- education: string (nullable = true)
+ |-- currentSmoker: integer (nullable = true)
+ |-- cigsPerDay: string (nullable = true)
+ |-- BPMeds: string (nullable = true)
+ |-- prevalentStroke: integer (nullable = true)
+ |-- prevalentHyp: integer (nullable = true)
+ |-- diabetes: integer (nullable = true)
+ |-- totChol: string (nullable = true)
+ |-- sysBP: double (nullable = true)
+ |-- diaBP: double (nullable = true)
+ |-- BMI: string (nullable = true)
+ |-- heartRate: string (nullable = true)
+ |-- glucose: string (nullable = true)
+ |-- TenYearCHD: integer (nullable = true)
+
+>>> 
+>>> 
+>>> 
+>>> # TODO : Add P-value finding signficant columns
+... def getSignificantColumns(df):
+...     ignore_cols = ['currentSmoker',  'BPMeds', 'prevalentStroke', 'prevalentHyp', 'diabetes', 'diaBP', 'BMI', 'heartRate']
+...     df = df.drop("education")
+...     for c in ignore_cols:
+...         df = df.drop(c)
+...     return df
+... # Ignore insignificant columns
+... df = getSignificantColumns(df)
+  File "<stdin>", line 9
+    df = getSignificantColumns(df)
+     ^
+SyntaxError: invalid syntax
+>>> 
+>>> # get feature columns to scale.
+... inputCols = [col for col in df.columns if col != "TenYearCHD"]
+>>> 
+>>> # Check missing value for single column
+... # df.filter(df['age'].isNull()).show()
+... 
+>>> # Check missing value for all columns
+... df.select([count(when(isnan(c), c)).alias(c) for c in df.columns]).show()
+
+
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+
+|male|age|education|currentSmoker|cigsPerDay|BPMeds|prevalentStroke|prevalentHyp|diabetes|totChol|sysBP|diaBP|BMI|heartRate|glucose|TenYearCHD|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+
+|   0|  0|        0|            0|         0|     0|              0|           0|       0|      0|    0|    0|  0|        0|      0|         0|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+
+
+>>> 
+>>> # Drop null records
+... df = df.replace("NA",None)
+>>> df = df.na.drop()
+>>> 
+>>> # update df count
+... print(df.count())
+3656
+>>> 
+>>> # set schema right by making everything as Integer.
+... inputCols
+['male', 'age', 'education', 'currentSmoker', 'cigsPerDay', 'BPMeds', 'prevalentStroke', 'prevalentHyp', 'diabetes', 'totChol', 'sysBP', 'diaBP', 'BMI', 'heartRate', 'glucose']
+>>> stringCols = []
+>>> for col, type in df.dtypes:
+...     if type == 'string':
+...             stringCols.append(col)
+... 
+>>> stringCols
+['education', 'cigsPerDay', 'BPMeds', 'totChol', 'BMI', 'heartRate', 'glucose']
+>>> 
+>>> for col in stringCols: df = df.withColumn(col, df[col].cast(IntegerType()))
+... 
+>>> # print update schema
+... df.printSchema()
+root
+ |-- male: integer (nullable = true)
+ |-- age: integer (nullable = true)
+ |-- education: integer (nullable = true)
+ |-- currentSmoker: integer (nullable = true)
+ |-- cigsPerDay: integer (nullable = true)
+ |-- BPMeds: integer (nullable = true)
+ |-- prevalentStroke: integer (nullable = true)
+ |-- prevalentHyp: integer (nullable = true)
+ |-- diabetes: integer (nullable = true)
+ |-- totChol: integer (nullable = true)
+ |-- sysBP: double (nullable = true)
+ |-- diaBP: double (nullable = true)
+ |-- BMI: integer (nullable = true)
+ |-- heartRate: integer (nullable = true)
+ |-- glucose: integer (nullable = true)
+ |-- TenYearCHD: integer (nullable = true)
+
+>>> 
+>>> # Vectorize (Feature transformer — VectorAssembler) + Scale feature cols
+... assembler = VectorAssembler(inputCols=inputCols, outputCol="inputVector")
+>>> # imputer = Imputer(inputCols = "inputVector", outputCols=["inputVector_imputed"], strategy='mean')
+... scaler = MinMaxScaler(inputCol="inputVector", outputCol="scaled")
+>>> pipeline = Pipeline(stages=[assembler, scaler])
+>>> scalerModel = pipeline.fit(df)
+
+>>> scaledData = scalerModel.transform(df)   
+>>> 
+>>> # show scaled data
+... scaledData.show(5)
+22/05/30 01:15:27 WARN util.Utils: Truncated the string representation of a plan since it was too large. This behavior can be adjusted by setting 'spark.debug.maxToStringFields' in SparkEnv.conf.
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+--------------------+--------------------+
+|male|age|education|currentSmoker|cigsPerDay|BPMeds|prevalentStroke|prevalentHyp|diabetes|totChol|sysBP|diaBP|BMI|heartRate|glucose|TenYearCHD|         inputVector|              scaled|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+--------------------+--------------------+
+|   1| 39|        4|            0|         0|     0|              0|           0|       0|    195|106.0| 70.0| 26|       80|     77|         0|[1.0,39.0,4.0,0.0...|[1.0,0.1842105263...|
+|   0| 46|        2|            0|         0|     0|              0|           0|       0|    250|121.0| 81.0| 28|       95|     76|         0|(15,[1,2,9,10,11,...|[0.0,0.3684210526...|
+|   1| 48|        1|            1|        20|     0|              0|           0|       0|    245|127.5| 80.0| 25|       75|     70|         0|[1.0,48.0,1.0,1.0...|[1.0,0.4210526315...|
+|   0| 61|        3|            1|        30|     0|              0|           1|       0|    225|150.0| 95.0| 28|       65|    103|         1|[0.0,61.0,3.0,1.0...|[0.0,0.7631578947...|
+|   0| 46|        3|            1|        23|     0|              0|           0|       0|    285|130.0| 84.0| 23|       85|     85|         0|[0.0,46.0,3.0,1.0...|[0.0,0.3684210526...|
++----+---+---------+-------------+----------+------+---------------+------------+--------+-------+-----+-----+---+---------+-------+----------+--------------------+--------------------+
+only showing top 5 rows
+
+>>> scaledData.select(["scaled","TenYearCHD"]).show(5)
++--------------------+----------+
+|              scaled|TenYearCHD|
++--------------------+----------+
+|[1.0,0.1842105263...|         0|
+|[0.0,0.3684210526...|         0|
+|[1.0,0.4210526315...|         0|
+|[0.0,0.7631578947...|         1|
+|[0.0,0.3684210526...|         0|
++--------------------+----------+
+only showing top 5 rows
+
+>>> 
+>>> # get required columns into df_final
+... df_final = scaledData.select(["scaled","TenYearCHD"])
+>>> df_final = df_final.withColumnRenamed("scaled", "features").withColumnRenamed("TenYearCHD", "label")
+>>> df_final.show()
++--------------------+-----+
+|            features|label|
++--------------------+-----+
+|[1.0,0.1842105263...|    0|
+|[0.0,0.3684210526...|    0|
+|[1.0,0.4210526315...|    0|
+|[0.0,0.7631578947...|    1|
+|[0.0,0.3684210526...|    0|
+|[0.0,0.2894736842...|    0|
+|[0.0,0.8157894736...|    1|
+|[0.0,0.3421052631...|    0|
+|[1.0,0.5263157894...|    0|
+|[1.0,0.2894736842...|    0|
+|[0.0,0.4736842105...|    0|
+|[0.0,0.2894736842...|    0|
+|[1.0,0.3684210526...|    0|
+|[0.0,0.2368421052...|    0|
+|[0.0,0.1578947368...|    1|
+|[1.0,0.4210526315...|    0|
+|[0.0,0.3684210526...|    1|
+|[0.0,0.1578947368...|    0|
+|[1.0,0.2368421052...|    0|
+|[0.0,0.2631578947...|    0|
++--------------------+-----+
+only showing top 20 rows
+
+>>> 
+>>> # Split data into train and test
+... train_df, test_df = df_final.randomSplit([.75,.25])
+>>> train_df.count()
+2697
+>>> test_df.count()
+959
+>>> 
+>>> # create models
+... lr = LogisticRegression(labelCol='label')
+>>> lr
+LogisticRegression_23aff45af467
+>>> rfc = RandomForestClassifier(labelCol='label', numTrees=100)
+>>> rfc
+RandomForestClassifier_67335b910229
+>>> nb = NaiveBayes(labelCol='label')
+>>> nb
+NaiveBayes_c92f1f4ee506
+>>> 
+>>> def getTrainTestAccuracy(train_predictions, string = "Test"):
+...     '''
+...     Return model accuracy for the given prediction set vs ground truth
+...     '''
+...     #Evaluate predictions under ROC probability curve for binary classification problems
+...     # evaluator = BinaryClassificationEvaluator()
+...     print("Training dataset Model accuracy \n")
+...     # print("Test Area Under ROC", evaluator.evaluate(train_predictions))
+...     accuracy = train_predictions.filter(train_predictions.label == train_predictions.prediction).count() / float(train_predictions.count())
+...     print(string + " Accuracy : ",accuracy)
+...     return accuracy
+... 
+>>> models = [lr, rfc, nb]
+>>> best_training_val, best_training_model = -1, None
+>>> best_test_val, best_test_model = -1, None
+>>> # train and test all models and get the best model.
+... for model in models:
+...     print("Model : ", model)
+...     trained_model = model.fit(train_df)
+...     train_predictions = trained_model.transform(train_df)
+...     # train_predictions.show(5)
+...     cv_training_acc = getTrainTestAccuracy(train_predictions, "Training")
+...     if cv_training_acc > best_training_val:
+...         best_training_val =cv_training_acc
+...         best_training_model = model
+...     # test predictions
+...     test_predictions = trained_model.transform(test_df)
+...     # test_predictions.show(5)
+...     cv_test_acc = getTrainTestAccuracy(test_predictions)
+...     if cv_test_acc > best_test_val:
+...         best_test_val = cv_test_acc
+...         best_test_model = model
+...     print('***************ENDing', model , '********************')
+... 
+('Model : ', LogisticRegression_23aff45af467)
+
+
+22/05/30 01:15:47 WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
+22/05/30 01:15:47 WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeRefBLAS
+Training dataset Model accuracy 
+
+('Training Accuracy : ', 0.8539117538005191)
+Training dataset Model accuracy 
+
+('Test Accuracy : ', 0.8571428571428571)
+('***************ENDing', LogisticRegression_23aff45af467, '********************')
+('Model : ', RandomForestClassifier_67335b910229)
+Training dataset Model accuracy 
+
+('Training Accuracy : ', 0.8494623655913979)
+Training dataset Model accuracy 
+
+('Test Accuracy : ', 0.8529718456725756)
+('***************ENDing', RandomForestClassifier_67335b910229, '********************')
+('Model : ', NaiveBayes_c92f1f4ee506)
+Training dataset Model accuracy 
+
+('Training Accuracy : ', 0.8457545420837969)
+Training dataset Model accuracy 
+
+('Test Accuracy : ', 0.8561001042752867)
+('***************ENDing', NaiveBayes_c92f1f4ee506, '********************')
+>>> 
+>>> print("Best test result are found with model {} with accuracy of {}".format(best_test_model, best_test_val))
+Best test result are found with model LogisticRegression_23aff45af467 with accuracy of 0.857142857143
