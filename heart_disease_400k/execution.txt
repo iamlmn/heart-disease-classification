@@ -1,0 +1,285 @@
+[lvaigaishrinivasan@linux10605 temp_project]$ pyspark
+Python 2.7.5 (default, Nov 16 2020, 22:23:17) 
+[GCC 4.8.5 20150623 (Red Hat 4.8.5-44)] on linux2
+Type "help", "copyright", "credits" or "license" for more information.
+Setting default log level to "WARN".
+To adjust logging level use sc.setLogLevel(newLevel). For SparkR, use setLogLevel(newLevel).
+22/05/30 01:45:52 WARN lineage.LineageWriter: Lineage directory /var/log/spark2/lineage doesn't exist or is not writable. Lineage for this application will be disabled.
+22/05/30 01:45:52 WARN lineage.LineageWriter: Lineage directory /var/log/spark2/lineage doesn't exist or is not writable. Lineage for this application will be disabled.
+Welcome to
+      ____              __
+     / __/__  ___ _____/ /__
+    _\ \/ _ \/ _ `/ __/  '_/
+   /__ / .__/\_,_/_/ /_/\_\   version 2.4.0.cloudera2
+      /_/
+
+Using Python version 2.7.5 (default, Nov 16 2020 22:23:17)
+SparkSession available as 'spark'.
+>>> #imports and setup
+... from pyspark.sql import SparkSession
+>>> from pyspark.ml.feature import (VectorAssembler, OneHotEncoder, StringIndexer)
+>>> from pyspark.ml import Pipeline
+>>> from pyspark.ml.classification import (LogisticRegression, RandomForestClassifier, NaiveBayes)
+>>> from pyspark.sql.functions import (col, explode, array, lit)
+>>> from pyspark.ml.evaluation import (BinaryClassificationEvaluator, MulticlassClassificationEvaluator)
+>>> from pyspark.mllib.evaluation import MulticlassMetrics
+>>> from pyspark.sql.types import FloatType
+>>> import pyspark.sql.functions as F
+>>>  
+... 
+>>> import numpy as np
+>>> import seaborn as sns
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+ImportError: No module named seaborn
+>>> import matplotlib.pyplot as plt
+
+(process:32024): Gtk-WARNING **: 01:46:22.608: Locale not supported by C library.
+	Using the fallback 'C' locale.
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/usr/lib64/python2.7/site-packages/matplotlib/pyplot.py", line 97, in <module>
+    _backend_mod, new_figure_manager, draw_if_interactive, _show = pylab_setup()
+  File "/usr/lib64/python2.7/site-packages/matplotlib/backends/__init__.py", line 25, in pylab_setup
+    globals(),locals(),[backend_name])
+  File "/usr/lib64/python2.7/site-packages/matplotlib/backends/backend_gtkagg.py", line 10, in <module>
+    from matplotlib.backends.backend_gtk import gtk, FigureManagerGTK, FigureCanvasGTK,\
+  File "/usr/lib64/python2.7/site-packages/matplotlib/backends/backend_gtk.py", line 13, in <module>
+    import gtk; gdk = gtk.gdk
+  File "/usr/lib64/python2.7/site-packages/gtk-2.0/gtk/__init__.py", line 64, in <module>
+    _init()
+  File "/usr/lib64/python2.7/site-packages/gtk-2.0/gtk/__init__.py", line 52, in _init
+    _gtk.init_check()
+RuntimeError: could not open display
+>>> spark = SparkSession.builder.appName('HeartDiseaseClassification').getOrCreate()
+>>> df = spark.read.csv('heart_2020.csv',inferSchema=True,header=True)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "/DCNFS/applications/cdh/5.16/app/SPARK2-2.4.0.cloudera2-1.cdh5.13.3.p0.1041012/lib/spark2/python/pyspark/sql/readwriter.py", line 472, in csv
+    return self._df(self._jreader.csv(self._spark._sc._jvm.PythonUtils.toSeq(path)))
+  File "/DCNFS/applications/cdh/5.16/app/SPARK2-2.4.0.cloudera2-1.cdh5.13.3.p0.1041012/lib/spark2/python/lib/py4j-0.10.7-src.zip/py4j/java_gateway.py", line 1257, in __call__
+  File "/DCNFS/applications/cdh/5.16/app/SPARK2-2.4.0.cloudera2-1.cdh5.13.3.p0.1041012/lib/spark2/python/pyspark/sql/utils.py", line 69, in deco
+    raise AnalysisException(s.split(': ', 1)[1], stackTrace)
+pyspark.sql.utils.AnalysisException: u'Path does not exist: hdfs://name1.hadoop.dc.engr.scu.edu:8020/user/lvaigaishrinivasan/heart_2020.csv;'
+>>> df = spark.read.csv('heart_2020_cleaned.csv',inferSchema=True,header=True)
+>>> df.show()                                                                   
++------------+-----+-------+---------------+------+--------------+------------+-----------+------+-----------+-----+--------------------+----------------+---------+---------+------+-------------+----------+
+|HeartDisease|  BMI|Smoking|AlcoholDrinking|Stroke|PhysicalHealth|MentalHealth|DiffWalking|   Sex|AgeCategory| Race|            Diabetic|PhysicalActivity|GenHealth|SleepTime|Asthma|KidneyDisease|SkinCancer|
++------------+-----+-------+---------------+------+--------------+------------+-----------+------+-----------+-----+--------------------+----------------+---------+---------+------+-------------+----------+
+|          No| 16.6|    Yes|             No|    No|           3.0|        30.0|         No|Female|      55-59|White|                 Yes|             Yes|Very good|      5.0|   Yes|           No|       Yes|
+|          No|20.34|     No|             No|   Yes|           0.0|         0.0|         No|Female|80 or older|White|                  No|             Yes|Very good|      7.0|    No|           No|        No|
+|          No|26.58|    Yes|             No|    No|          20.0|        30.0|         No|  Male|      65-69|White|                 Yes|             Yes|     Fair|      8.0|   Yes|           No|        No|
+|          No|24.21|     No|             No|    No|           0.0|         0.0|         No|Female|      75-79|White|                  No|              No|     Good|      6.0|    No|           No|       Yes|
+|          No|23.71|     No|             No|    No|          28.0|         0.0|        Yes|Female|      40-44|White|                  No|             Yes|Very good|      8.0|    No|           No|        No|
+|         Yes|28.87|    Yes|             No|    No|           6.0|         0.0|        Yes|Female|      75-79|Black|                  No|              No|     Fair|     12.0|    No|           No|        No|
+|          No|21.63|     No|             No|    No|          15.0|         0.0|         No|Female|      70-74|White|                  No|             Yes|     Fair|      4.0|   Yes|           No|       Yes|
+|          No|31.64|    Yes|             No|    No|           5.0|         0.0|        Yes|Female|80 or older|White|                 Yes|              No|     Good|      9.0|   Yes|           No|        No|
+|          No|26.45|     No|             No|    No|           0.0|         0.0|         No|Female|80 or older|White|No, borderline di...|              No|     Fair|      5.0|    No|          Yes|        No|
+|          No|40.69|     No|             No|    No|           0.0|         0.0|        Yes|  Male|      65-69|White|                  No|             Yes|     Good|     10.0|    No|           No|        No|
+|         Yes| 34.3|    Yes|             No|    No|          30.0|         0.0|        Yes|  Male|      60-64|White|                 Yes|              No|     Poor|     15.0|   Yes|           No|        No|
+|          No|28.71|    Yes|             No|    No|           0.0|         0.0|         No|Female|      55-59|White|                  No|             Yes|Very good|      5.0|    No|           No|        No|
+|          No|28.37|    Yes|             No|    No|           0.0|         0.0|        Yes|  Male|      75-79|White|                 Yes|             Yes|Very good|      8.0|    No|           No|        No|
+|          No|28.15|     No|             No|    No|           7.0|         0.0|        Yes|Female|80 or older|White|                  No|              No|     Good|      7.0|    No|           No|        No|
+|          No|29.29|    Yes|             No|    No|           0.0|        30.0|        Yes|Female|      60-64|White|                  No|              No|     Good|      5.0|    No|           No|        No|
+|          No|29.18|     No|             No|    No|           1.0|         0.0|         No|Female|      50-54|White|                  No|             Yes|Very good|      6.0|    No|           No|        No|
+|          No|26.26|     No|             No|    No|           5.0|         2.0|         No|Female|      70-74|White|                  No|              No|Very good|     10.0|    No|           No|        No|
+|          No|22.59|    Yes|             No|    No|           0.0|        30.0|        Yes|  Male|      70-74|White|No, borderline di...|             Yes|     Good|      8.0|    No|           No|        No|
+|          No|29.86|    Yes|             No|    No|           0.0|         0.0|        Yes|Female|      75-79|Black|                 Yes|              No|     Fair|      5.0|    No|          Yes|        No|
+|          No|18.13|     No|             No|    No|           0.0|         0.0|         No|  Male|80 or older|White|                  No|             Yes|Excellent|      8.0|    No|           No|       Yes|
++------------+-----+-------+---------------+------+--------------+------------+-----------+------+-----------+-----+--------------------+----------------+---------+---------+------+-------------+----------+
+only showing top 20 rows
+
+>>> #Schema of the table
+... df.printSchema()
+root
+ |-- HeartDisease: string (nullable = true)
+ |-- BMI: double (nullable = true)
+ |-- Smoking: string (nullable = true)
+ |-- AlcoholDrinking: string (nullable = true)
+ |-- Stroke: string (nullable = true)
+ |-- PhysicalHealth: double (nullable = true)
+ |-- MentalHealth: double (nullable = true)
+ |-- DiffWalking: string (nullable = true)
+ |-- Sex: string (nullable = true)
+ |-- AgeCategory: string (nullable = true)
+ |-- Race: string (nullable = true)
+ |-- Diabetic: string (nullable = true)
+ |-- PhysicalActivity: string (nullable = true)
+ |-- GenHealth: string (nullable = true)
+ |-- SleepTime: double (nullable = true)
+ |-- Asthma: string (nullable = true)
+ |-- KidneyDisease: string (nullable = true)
+ |-- SkinCancer: string (nullable = true)
+
+>>> 
+>>> label = 'HeartDisease'
+>>> numerical_cols = ['BMI', 'PhysicalHealth','MentalHealth','SleepTime']
+>>> categorical_cols = list(set(df.columns) - set(numerical_cols) -set([label]))
+>>> # stats of numerical variables
+... df.select(numerical_cols).describe().show()
+
++-------+------------------+------------------+-----------------+------------------+
+|summary|               BMI|    PhysicalHealth|     MentalHealth|         SleepTime|
++-------+------------------+------------------+-----------------+------------------+
+|  count|            319795|            319795|           319795|            319795|
+|   mean|28.325398520925706|3.3717100017198516|3.898366140808956| 7.097074688472302|
+| stddev| 6.356100200470763| 7.950850182571355|7.955235218943604|1.4360070609642803|
+|    min|             12.02|               0.0|              0.0|               1.0|
+|    max|             94.85|              30.0|             30.0|              24.0|
++-------+------------------+------------------+-----------------+------------------+
+
+>>> 
+>>> # check number of observations of differente samples
+... df.groupBy(label).count()
+DataFrame[HeartDisease: string, count: bigint]
+>>> 
+>>> #splitting data into train and test sets before Oversampling
+... train_df, test_df = df.randomSplit([.7,.3])
+>>> #spliting df by classes
+... major_df = train_df.filter(col(label) == 'No')
+>>> minor_df = train_df.filter(col(label) == 'Yes')
+>>> #ratio of number observation major vs minor class
+... r = int(major_df.count()/minor_df.count())
+
+>>>                                                                             
+... # duplicate the minority rows
+... oversampled_df = minor_df.withColumn("dummy", explode(array([lit(x) for x in range(r)]))).drop('dummy')
+>>>  
+... # combine both oversampled minority rows and previous majority rows 
+... combined_train_df = major_df.unionAll(oversampled_df)
+>>> # Indexers for categorical columns
+... indexers = [StringIndexer(inputCol=col, outputCol=col+'_indexed') for col in categorical_cols]
+>>> # Encoders for categorical columns
+... encoders = [OneHotEncoder(inputCol=col+'_indexed', outputCol=col+'_encoded') for col in categorical_cols]
+>>>  
+... # Indexer for classification label:
+... label_indexer = StringIndexer(inputCol=label, outputCol=label+'_indexed')
+>>> 
+>>> #assemble all features as vector to be used as input for Spark MLLib
+... assembler = VectorAssembler(inputCols= [col+'_encoded' for col in categorical_cols] + numerical_cols, outputCol='features')
+>>> 
+>>> # Creating data processing pipeline
+... pipeline = Pipeline(stages= indexers + encoders + [label_indexer, assembler])
+>>> 
+>>> lr = LogisticRegression(featuresCol='features', labelCol=label+'_indexed')
+>>> rfc = RandomForestClassifier(featuresCol='features', labelCol=label+'_indexed', numTrees=100)
+>>> nb = NaiveBayes(featuresCol='features', labelCol=label+'_indexed')
+>>> 
+>>> 
+>>> # creating pipelines with machine learning models
+... pipeline_lr = Pipeline(stages=[pipeline, lr])
+>>> pipeline_rfc = Pipeline(stages=[pipeline, rfc])
+>>> pipeline_nb = Pipeline(stages=[pipeline, nb])
+>>> 
+>>> #fitting models with train subset
+... lr_fit = pipeline_lr.fit(combined_train_df)
+
+
+22/05/30 01:50:17 WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeSystemBLAS
+22/05/30 01:50:17 WARN netlib.BLAS: Failed to load implementation from: com.github.fommil.netlib.NativeRefBLAS
+>>> rfc_fit = pipeline_rfc.fit(combined_train_df)
+>>> nb_fit = pipeline_nb.fit(combined_train_df)                                 
+22/05/30 01:51:40 WARN util.Utils: Truncated the string representation of a plan since it was too large. This behavior can be adjusted by setting 'spark.debug.maxToStringFields' in SparkEnv.conf.
+>>>                                                                             
+>>> # predictions for test subset
+... pred_lr = lr_fit.transform(test_df)
+
+>>> pred_rfc = rfc_fit.transform(test_df)
+>>> pred_nb = nb_fit.transform(test_df)
+>>>  # Area Under Curve - AUC
+... 
+>>> pred_AUC = BinaryClassificationEvaluator(rawPredictionCol='prediction', labelCol=label+'_indexed')
+>>> AUC_lr = pred_AUC.evaluate(pred_lr)
+>>> AUC_rfc = pred_AUC.evaluate(pred_rfc)                                       
+>>> AUC_nb = pred_AUC.evaluate(pred_nb)                                         
+>>> print(AUC_lr, AUC_rfc, AUC_nb)
+(0.7633699042549198, 0.7159574648077872, 0.617450168755267)
+>>> # calculating accuracy for all negative prediction mentioned above
+... acc_all_negative = test_df.filter(test_df[label]=='No').count() / test_df.count()
+
+
+
+>>> acc_all_negative
+0
+>>> 
+>>> 
+>>> acc_evaluator = MulticlassClassificationEvaluator(labelCol=label+'_indexed', predictionCol="prediction", metricName="accuracy")
+>>> acc_lr = acc_evaluator.evaluate(pred_lr)
+
+>>> acc_rfc = acc_evaluator.evaluate(pred_rfc)                                  
+>>> acc_nb = acc_evaluator.evaluate(pred_nb)                                    
+>>> print('Logistic Regression accuracy: ', '{:.2f}'.format(acc_lr*100), '%', sep='')
+  File "<stdin>", line 1
+    print('Logistic Regression accuracy: ', '{:.2f}'.format(acc_lr*100), '%', sep='')
+                                                                                 ^
+SyntaxError: invalid syntax
+>>> print('Random Forest accuracy: ', '{:.2f}'.format(acc_rfc*100), '%', sep='')
+  File "<stdin>", line 1
+    print('Random Forest accuracy: ', '{:.2f}'.format(acc_rfc*100), '%', sep='')
+                                                                            ^
+SyntaxError: invalid syntax
+>>> print('Naive Bayes accuracy: ', '{:.2f}'.format(acc_nb*100), '%', sep='')
+  File "<stdin>", line 1
+    print('Naive Bayes accuracy: ', '{:.2f}'.format(acc_nb*100), '%', sep='')
+                                                                         ^
+SyntaxError: invalid syntax
+>>> print('Logistic Regression accuracy: ', '{:.2f}'.format(acc_lr*100), '%')
+('Logistic Regression accuracy: ', '76.22', '%')
+>>> print('Random Forest accuracy: ', '{:.2f}'.format(acc_rfc*100), '%')
+('Random Forest accuracy: ', '75.54', '%')
+>>> print('Naive Bayes accuracy: ', '{:.2f}'.format(acc_nb*100), '%')
+('Naive Bayes accuracy: ', '81.81', '%')
+>>> def confusion_matrix(pred_df):
+...     preds_labels = pred_df.select(['prediction',label+'_indexed']).withColumn(label+'_indexed', F.col(label+'_indexed').cast(FloatType())).orderBy('prediction')
+...     preds_labels = preds_and_labels.select(['prediction',label+'_indexed'])
+...     metrics = MulticlassMetrics(preds_labels.rdd.map(tuple))
+...     return metrics.confusionMatrix().toArray()
+... 
+>>> 
+>>> conf_lr = confusion_matrix(pred_lr)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "<stdin>", line 3, in confusion_matrix
+NameError: global name 'preds_and_labels' is not defined
+>>> conf_rfc = confusion_matrix(pred_rfc)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "<stdin>", line 3, in confusion_matrix
+NameError: global name 'preds_and_labels' is not defined
+>>> conf_nb = confusion_matrix(pred_nb)
+Traceback (most recent call last):
+  File "<stdin>", line 1, in <module>
+  File "<stdin>", line 3, in confusion_matrix
+NameError: global name 'preds_and_labels' is not defined
+>>> 
+>>> def confusion_matrix(pred_df):
+...     preds_labels = pred_df.select(['prediction',label+'_indexed']).withColumn(label+'_indexed', F.col(label+'_indexed').cast(FloatType())).orderBy('prediction')
+...     preds_labels = preds_labels.select(['prediction',label+'_indexed'])
+...     metrics = MulticlassMetrics(preds_labels.rdd.map(tuple))
+...     return metrics.confusionMatrix().toArray()
+... 
+>>> conf_lr = confusion_matrix(pred_lr)
+
+>>> conf_rfc = confusion_matrix(pred_rfc)                                       
+>>> conf_nb = confusion_matrix(pred_nb)                                         
+>>> def sensitivity(conf_mat):                                                  
+...     TP = conf_mat[1][1]
+...     FN = conf_mat[1][0]
+...     result = TP / (TP + FN)
+...     return result
+... 
+>>> 
+>>> print('Logistic Regression sensitivity: ', (sensitivity(conf_lr)*100).round(2), '%')
+('Logistic Regression sensitivity: ', 76.280000000000001, '%')
+>>> print('Random Forest sensitivity: ', (sensitivity(conf_rfc)*100).round(2), '%')
+('Random Forest sensitivity: ', 67.120000000000005, '%')
+>>> print('Naive Bayes sensitivity: ', (sensitivity(conf_nb)*100).round(2), '%')
+('Naive Bayes sensitivity: ', 38.359999999999999, '%')
+>>> '''
+... Results
+... The best performing model was Logistic Regression;
+... The true positive rate was 77%. This indicates that 77 percent of heart disease patients were appropriately identified;
+... The model's False Positive rate (or Specificity) is high, although lowering this statistic is not the primary goal.
+... '''
+"\nResults\nThe best performing model was Logistic Regression;\nThe true positive rate was 77%. This indicates that 77 percent of heart disease patients were appropriately identified;\nThe model's False Positive rate (or Specificity) is high, although lowering this statistic is not the primary goal.\n"
+>>> 
