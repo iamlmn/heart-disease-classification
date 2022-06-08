@@ -1,263 +1,139 @@
-#imports and setup
 from pyspark.sql import SparkSession
-from pyspark.ml.feature import (VectorAssembler, OneHotEncoder, StringIndexer)
-from pyspark.ml import Pipeline
-from pyspark.ml.classification import (LogisticRegression, RandomForestClassifier, NaiveBayes)
-from pyspark.sql.functions import (col, explode, array, lit)
-from pyspark.ml.evaluation import (BinaryClassificationEvaluator, MulticlassClassificationEvaluator)
-from pyspark.mllib.evaluation import MulticlassMetrics
+from pyspark.sql.functions import col, explode, array, lit
 from pyspark.sql.types import FloatType
+from pyspark.ml.feature import OneHotEncoder, StringIndexer, VectorAssembler
+from pyspark.ml.classification import LogisticRegression, RandomForestClassifier, NaiveBayes
+from pyspark.ml.evaluation import BinaryClassificationEvaluator, MulticlassClassificationEvaluator
+from pyspark.mllib.evaluation import MulticlassMetrics
 import pyspark.sql.functions as F
- 
-
+from pyspark.ml import Pipeline
 import numpy as np
-# import seaborn as sns
-# import matplotlib.pyplot as plt
- 
-spark = SparkSession.builder.appName('HeartDiseaseClassification').getOrCreate()
 
-df = spark.read.csv('heart_2020_cleaned.csv',inferSchema=True,header=True)
-display(df.head(5))
-
-#Schema of the table
+#creating the spark session and setting up the pyspark data frames
+spark = SparkSession.builder.appName('Heart-Disease-Prediction').getOrCreate()
+df = spark.read.csv('project/heart_2020_cleaned.csv',inferSchema=True,header=True)
+df.show(5)
+df.count()
 df.printSchema()
 
+#checking for null values and removing them
+df = df.na.drop()
+df.count()
+
+#selecting the numerical and categorical columns in the dataset
+numericalCols = [col for col, type in df.dtypes if type != 'string'] 
+categoricalCols = [col for col, type in df.dtypes if type == 'string']
+categoricalCols.remove('HeartDisease') 
+print(numericalCols, categoricalCols)
+
+#splitting data into training and test datasets 
+train_df, test_df = df.randomSplit([.75,.25])
+
+#splitting the training dataset into major and minor datasets
+major_df = train_df.filter(df.HeartDisease == 'No')
+minor_df = train_df.filter(df.HeartDisease == 'Yes')
+
+#random oversampling of minor dataset
+
+def oversampling(major_df, minor_df):
+    ratio = int(major_df.count()/minor_df.count())
+    oversampled_minor_df = minor_df.withColumn('dummy', explode(array([lit(row) for row in range(ratio)]))).drop('dummy')
+    return major_df.unionAll(oversampled_minor_df)
+
+oversampled_df = oversampling(major_df, minor_df)
+
+#data preparation before using classification models
+
+#StringIndexer to convert categorical columns into label indices
+string_indexers = [StringIndexer(inputCol=col, outputCol=col+'_index') for col in categoricalCols]
+
+#OneHotEncoder to convert label indices into binary vectors
+one_hot_encoders = [OneHotEncoder(inputCol=col+'_index', outputCol=col+'_vector') for col in categoricalCols]
+
+#StringIndexer to convert label into label index
+label_index = StringIndexer(inputCol='HeartDisease', outputCol='HeartDisease_index')
+
+#VectorAssembler to transform multiple columns into a single vector column
+inputCols = [col+'_vector' for col in categoricalCols] + numericalCols
+vector_assembler = VectorAssembler(inputCols=inputCols, outputCol='features') 
+
+#pipeline to implement all the stages of data preparation
+pipeline = Pipeline(stages=string_indexers + one_hot_encoders + [label_index, vector_assembler])
+
+#classification models - logistic regression, random forest and naive bayes
+logistic_regression = LogisticRegression(featuresCol='features', labelCol='HeartDisease_index')
+random_forest = RandomForestClassifier(featuresCol='features', labelCol='HeartDisease_index', numTrees=100)
+naive_bayes = NaiveBayes(featuresCol='features', labelCol='HeartDisease_index')
+
+#creating pipelines for the classification models
+logistic_regression_pipeline = Pipeline(stages=[pipeline, logistic_regression])
+random_forest_pipeline = Pipeline(stages=[pipeline, random_forest])
+naive_bayes_pipeline = Pipeline(stages=[pipeline, naive_bayes])
 
 
-label = 'HeartDisease'
-numerical_cols = ['BMI', 'PhysicalHealth','MentalHealth','SleepTime']
-categorical_cols = list(set(df.columns) - set(numerical_cols) -set([label]))
+#fitting models with the oversampled training dataset
+logistic_regression_fit = logistic_regression_pipeline.fit(oversampled_df)
+random_forest_fit = random_forest_pipeline.fit(oversampled_df)
+naive_bayes_fit = naive_bayes_pipeline.fit(oversampled_df)
 
 
-# data distrivuton
-# stats of numerical variables
-df.select(numerical_cols).describe().show()
+#predictions for the test dataset
+logistic_regression_prediction = logistic_regression_fit.transform(test_df)
+random_forest_prediction = random_forest_fit.transform(test_df)
+naive_bayes_prediction = naive_bayes_fit.transform(test_df)
 
 
-# check number of observations of differente samples
-# df.groupBy(label).count().toPandas().plot.bar(x='HeartDisease', rot=0, title='Number of Observations per label')
+#results evaluation
+
+#area_under_curve
+
+AUC_prediction = BinaryClassificationEvaluator(rawPredictionCol='prediction', labelCol='HeartDisease_index')
+
+AUC_logistic_regression = AUC_prediction.evaluate(logistic_regression_prediction)
+AUC_random_forest = AUC_prediction.evaluate(random_forest_prediction)
+AUC_naive_bayes = AUC_prediction.evaluate(naive_bayes_prediction)
+
+print('Logistic Regression AUC: {:.2f}'.format(AUC_logistic_regression*100))
+print('Random Forest AUC: {:.2f}'.format(AUC_random_forest*100))
+print('Naive Bayes AUC: {:.2f}'.format(AUC_naive_bayes*100))
 
 
-# Preparing Data for Classification Models
-'''
-Working with an Unbalanced Dataset. Oversampling Smallest Class
-As can be seen above, this dataset is extremely imbalanced. This is frequent in disease-related datasets.
+#accuracy
 
-In this section, I will perform oversampling on the smaller class to lessen the bias of the classification models.
-'''
+accuracy_evaluator = MulticlassClassificationEvaluator(labelCol='HeartDisease_index', predictionCol="prediction", metricName="accuracy")
 
-#splitting data into train and test sets before Oversampling
-train_df, test_df = df.randomSplit([.7,.3])
-
-
-#spliting df by classes
-major_df = train_df.filter(col(label) == 'No')
-minor_df = train_df.filter(col(label) == 'Yes')
-#ratio of number observation major vs minor class
-r = int(major_df.count()/minor_df.count())
+accuracy_logistic_regression = accuracy_evaluator.evaluate(logistic_regression_prediction)
+accuracy_random_forest = accuracy_evaluator.evaluate(random_forest_prediction)
+accuracy_naive_bayes = accuracy_evaluator.evaluate(naive_bayes_prediction)
  
-# duplicate the minority rows
-oversampled_df = minor_df.withColumn("dummy", explode(array([lit(x) for x in range(r)]))).drop('dummy')
- 
-# combine both oversampled minority rows and previous majority rows 
-combined_train_df = major_df.unionAll(oversampled_df)
+print('Logistic Regression accuracy: {:.2f}'.format(accuracy_logistic_regression*100))
+print('Random Forest accuracy: {:.2f}'.format(accuracy_random_forest*100))
+print('Naive Bayes accuracy: {:.2f}'.format(accuracy_naive_bayes*100))
 
 
-# combined_train_df.groupBy(label).count().toPandas().plot.bar(x='HeartDisease', rot=0, title='Number of Observations in Train subset after Oversampling')
+#confusion matrices
 
-
-
-# Processing Categorical Columns for Spark Pipeline
-
-'''
-String columns cannot be used as input to Spark. To address this, I'll need to employ an indexer on these columns, followed by an encoding.
-
-I also need to vectorize all the features into a features column after I have all columns with numerical values.
-
-'''
-
-# Indexers for categorical columns
-indexers = [StringIndexer(inputCol=col, outputCol=col+'_indexed') for col in categorical_cols]
-# Encoders for categorical columns
-encoders = [OneHotEncoder(inputCol=col+'_indexed', outputCol=col+'_encoded') for col in categorical_cols]
- 
-# Indexer for classification label:
-label_indexer = StringIndexer(inputCol=label, outputCol=label+'_indexed')
-
-
-#assemble all features as vector to be used as input for Spark MLLib
-assembler = VectorAssembler(inputCols= [col+'_encoded' for col in categorical_cols] + numerical_cols, outputCol='features') 
-
-
-# Creating data processing pipeline
-pipeline = Pipeline(stages= indexers + encoders + [label_indexer, assembler])
-
-
-# Applying Classification Models
-# Models Implemented:
-# lr - Logistic Regression
-# rfc - Random Forest Classifier
-# nb - Naive Bayes
-
-
-lr = LogisticRegression(featuresCol='features', labelCol=label+'_indexed')
-rfc = RandomForestClassifier(featuresCol='features', labelCol=label+'_indexed', numTrees=100)
-nb = NaiveBayes(featuresCol='features', labelCol=label+'_indexed')
-
-
-
-# creating pipelines with machine learning models
-pipeline_lr = Pipeline(stages=[pipeline, lr])
-pipeline_rfc = Pipeline(stages=[pipeline, rfc])
-pipeline_nb = Pipeline(stages=[pipeline, nb])
-
-
-#fitting models with train subset
-lr_fit = pipeline_lr.fit(combined_train_df)
-rfc_fit = pipeline_rfc.fit(combined_train_df)
-nb_fit = pipeline_nb.fit(combined_train_df)
-
-
-# predictions for test subset
-pred_lr = lr_fit.transform(test_df)
-pred_rfc = rfc_fit.transform(test_df)
-pred_nb = nb_fit.transform(test_df)
-
-
-# Evaluating Results
-
-'''
-Area Under Curve - AUC
-The AUC of a random selection of labels is 0.5. The closer this metric is to one, the better the model predicts the data labels.
-
-Regarding this metric, the logistic regression model outperforms the Random Forest Classifier. The Naive Bayes Classifier performed the poorest.
-'''
-
-pred_AUC = BinaryClassificationEvaluator(rawPredictionCol='prediction', labelCol=label+'_indexed')
-
-AUC_lr = pred_AUC.evaluate(pred_lr)
-AUC_rfc = pred_AUC.evaluate(pred_rfc)
-AUC_nb = pred_AUC.evaluate(pred_nb)
-print(AUC_lr, AUC_rfc, AUC_nb)
-
-# Accuracy - A poor Evaluation Metric for Unbalanced Classification
-
-
-'''
-Accuracy is a common metric used when evaluating classification problems. It is calculated by
-
-\frac{TP + TN}{\textit{All Samples}} 
-All Samples
-TP+TN
-​
- 
-Where TP = True Positives and TN = True Negatives
-
-Note that for this particular case this is not the best metric because the Negative label represents the grand majority of the observation.
-
-As an extreme example, if I predicted that all observations would be negative for heart disease, the accuracy for this test subgroup would be 91.48 percent.
-
-Looking at the results for these three models, the Naive Bayes has the best accuracy while being the lowest performing model in terms of TP. When analyzing these models, special emphasis should be placed on the TP cases.
-'''
-
-# calculating accuracy for all negative prediction mentioned above
-acc_all_negative = test_df.filter(test_df[label]=='No').count() / test_df.count()
-acc_all_negative
-
-
-acc_evaluator = MulticlassClassificationEvaluator(labelCol=label+'_indexed', predictionCol="prediction", metricName="accuracy")
-
-
-acc_lr = acc_evaluator.evaluate(pred_lr)
-acc_rfc = acc_evaluator.evaluate(pred_rfc)
-acc_nb = acc_evaluator.evaluate(pred_nb)
- 
-print('Logistic Regression accuracy: {:.2f}'.format(acc_lr*100))
-print('Random Forest accuracy: {:.2f}'.format(acc_rfc*100))
-print('Naive Bayes accuracy: {:.2f}'.format(acc_nb*100))
-
-
-# Confusion Matrices/
-
-def confusion_matrix(pred_df):
-    preds_labels = pred_df.select(['prediction',label+'_indexed']).withColumn(label+'_indexed', F.col(label+'_indexed').cast(FloatType())).orderBy('prediction')
-    preds_labels = preds_labels.select(['prediction',label+'_indexed'])
-    metrics = MulticlassMetrics(preds_labels.rdd.map(tuple))
+def confusion_matrix(prediction_df):
+    prediction_labels = prediction_df.select(['prediction','HeartDisease_index']).withColumn('HeartDisease_index', F.col('HeartDisease_index').cast(FloatType())).orderBy('prediction')
+    prediction_labels = prediction_labels.select(['prediction','HeartDisease_index'])
+    metrics = MulticlassMetrics(prediction_labels.rdd.map(tuple))
     return metrics.confusionMatrix().toArray()
 
 
-
-# def confusion_matrix_plot(conf_mat, ax, title = 'Confusion Matrix'):
-#     names = ['True Negative','False Positive','False Negative','True Positive']
- 
-#     number = ["{0:0.0f}".format(value) for value in conf_mat.flatten()]
- 
-#     percent = ["{0:.2%}".format(value) for value in conf_mat.flatten()/np.sum(conf_mat)]
- 
-#     labels = [f"{v1}\n\n{v2}\n\n{v3}" for v1, v2, v3 in zip(names, number, percent)]
- 
-#     labels = np.asarray(labels).reshape(2,2)
- 
-#     ax = sns.heatmap(conf_mat, annot=labels, fmt='', cmap='Blues', cbar=False, ax=ax)
- 
-#     ax.set_title(title+'\n');
-#     ax.set_xlabel('\nPredicted Labels')
-#     ax.set_ylabel('Real Labels');
- 
-#     ax.xaxis.set_ticklabels(['No','Yes'])
-#     ax.yaxis.set_ticklabels(['No','Yes'])
-    
-#     return ax
+confusion_matrix_logistic_regression = confusion_matrix(logistic_regression_prediction)
+confusion_matrix_random_forest = confusion_matrix(random_forest_prediction)
+confusion_matrix_naive_bayes = confusion_matrix(naive_bayes_prediction)
 
 
-conf_lr = confusion_matrix(pred_lr)
-conf_rfc = confusion_matrix(pred_rfc)
-conf_nb = confusion_matrix(pred_nb)
+#sensitivity
+
+def sensitivity(conf_matrix):
+    TP = conf_matrix[1][1]
+    FN = conf_matrix[1][0]
+    return TP/(TP+FN)
 
 
-# fig, (ax1, ax2, ax3) = plt.subplots(1,3, figsize=(20,5))
- 
-# ax1 = confusion_matrix_plot(conf_lr, ax1,'Logistic Regression - Confusion Matrix')
-# ax2 = confusion_matrix_plot(conf_rfc, ax2,'Random Forest Classifier - Confusion Matrix')
-# ax3 = confusion_matrix_plot(conf_nb, ax3, 'Naive Bayes - Confusion Matrix')
- 
-# plt.show()
+print('Logistic Regression sensitivity: {}'.format((sensitivity(confusion_matrix_logistic_regression)*100).round(2)))
+print('Random Forest sensitivity: {}'.format((sensitivity(confusion_matrix_random_forest)*100).round(2)))
+print('Naive Bayes sensitivity: {}'.format((sensitivity(confusion_matrix_naive_bayes)*100).round(2)))
 
-
-# Sensitivity Metric
-'''
-Sensitivity is the True Positive Rate of the classification:
-
-\frac{TP}{TP + FN} 
-TP+FN
-TP
-​
- 
-where TP = True Positive and FN = False Negative.
-
-It is a measure of how well the Positive label is predicted.
-'''
-
-
-def sensitivity(conf_mat):
-    TP = conf_mat[1][1]
-    FN = conf_mat[1][0]
-    result = TP / (TP + FN)
-    return result
-
-
-print('Logistic Regression sensitivity: {}'.format((sensitivity(conf_lr)*100).round(2)))
-print('Random Forest sensitivity: {}'.format((sensitivity(conf_rfc)*100).round(2)))
-print('Naive Bayes sensitivity: {}'.format((sensitivity(conf_nb)*100).round(2)))
-
-# Results
-
-'''
-
-
-The best performing model was Logistic Regression;
-The true positive rate was 77%. This indicates that 77 percent of heart disease patients were appropriately identified;
-The model's False Positive rate (or Specificity) is high, although lowering this statistic is not the primary goal.
-Overall, the Logistic Regression model yields useful results (sensitivity higher than 50% = better than random guess). Despite this, 77 percent is still a low percentage for classification algorithms.
-
-'''
