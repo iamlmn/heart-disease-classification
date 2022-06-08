@@ -11,7 +11,7 @@ import numpy as np
 
 #creating the spark session and setting up the pyspark data frames
 spark = SparkSession.builder.appName('Heart-Disease-Prediction').getOrCreate()
-df = spark.read.csv('heart_2020_cleaned.csv',inferSchema=True,header=True)
+df = spark.read.csv('project/heart_2020_cleaned.csv',inferSchema=True,header=True)
 df.show(5)
 df.count()
 df.printSchema()
@@ -45,12 +45,10 @@ oversampled_df = oversampling(major_df, minor_df)
 #data preparation before using classification models
 
 #StringIndexer to convert categorical columns into label indices
-for col in categoricalCols:
-    string_indexers = StringIndexer(inputCol=col, outputCol=col+'_index')
+string_indexers = [StringIndexer(inputCol=col, outputCol=col+'_index') for col in categoricalCols]
 
 #OneHotEncoder to convert label indices into binary vectors
-for col in categoricalCols:
-    one_hot_encoders = OneHotEncoder(inputCol=col+'_index', outputCol=col+'_vector')
+one_hot_encoders = [OneHotEncoder(inputCol=col+'_index', outputCol=col+'_vector') for col in categoricalCols]
 
 #StringIndexer to convert label into label index
 label_index = StringIndexer(inputCol='HeartDisease', outputCol='HeartDisease_index')
@@ -95,7 +93,9 @@ AUC_logistic_regression = AUC_prediction.evaluate(logistic_regression_prediction
 AUC_random_forest = AUC_prediction.evaluate(random_forest_prediction)
 AUC_naive_bayes = AUC_prediction.evaluate(naive_bayes_prediction)
 
-print(AUC_logistic_regression, AUC_random_forest, AUC_naive_bayes)
+print('Logistic Regression AUC: {:.2f}'.format(AUC_logistic_regression*100))
+print('Random Forest AUC: {:.2f}'.format(AUC_random_forest*100))
+print('Naive Bayes AUC: {:.2f}'.format(AUC_naive_bayes*100))
 
 
 #accuracy
